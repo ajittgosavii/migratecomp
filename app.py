@@ -185,6 +185,7 @@ tabs = st.tabs([
     "Executive Summary",
     "AI Factor Comparison",
     "Timeline & Cost",
+    "Cost by Cloud",
     "Cost to PG&E",
     "Agentic AI Pillars",
     "Phase Breakdown",
@@ -447,8 +448,101 @@ with tabs[2]:
         })
     st.dataframe(pd.DataFrame(savings_rows), use_container_width=True)
 
-# ======== TAB 3: Cost to PG&E ========
+# ======== TAB 3: Cost by Cloud (AWS / Azure / Azure Local) ========
 with tabs[3]:
+    st.header("Cost by Cloud Platform — AWS vs Azure vs Azure Local")
+
+    st.markdown("**PG&E Workload:** AWS (107 apps, 719 servers) | Azure (145 apps, 852 servers) | Azure Local/HV (130 apps, 2702 servers)")
+
+    # Per-cloud traditional days (from Migration Activities, Discovery done)
+    AWS_TRAD = 533; AZ_TRAD = 538; AZL_TRAD = 586
+    RATE = 1050
+
+    # Per-tool factors per cloud
+    cloud_factors = {
+        'CloudMigrate.store':  {'AWS': 0.38, 'Azure': 0.38, 'Azure Local': 0.38, 'note': 'Full multi-cloud'},
+        'Matilda Cloud':       {'AWS': 0.42, 'Azure': 0.42, 'Azure Local': 0.42, 'note': 'Full multi-cloud'},
+        'Concierto Migrate':   {'AWS': 0.39, 'Azure': 0.39, 'Azure Local': 0.39, 'note': 'Full multi-cloud'},
+        'AWS Transform+Kiro':  {'AWS': 0.34, 'Azure': 0.50, 'Azure Local': 0.52, 'note': 'AWS-native only; Azure/AzLocal = industry std'},
+    }
+
+    # Build comparison data
+    cloud_data = []
+    for name in tool_names:
+        factors = cloud_factors.get(name, {'AWS': 0.45, 'Azure': 0.45, 'Azure Local': 0.45})
+        for cloud, trad, apps, servers in [('AWS', AWS_TRAD, 107, 719), ('Azure', AZ_TRAD, 145, 852), ('Azure Local', AZL_TRAD, 130, 2702)]:
+            f = factors.get(cloud, 0.45)
+            ai_d = round(trad * f)
+            ftes = round(17 * apps / 382)  # proportional FTE allocation
+            y1_cost = ai_d * ftes * RATE
+            y2_cost = y1_cost * 0.13
+            total_2yr = y1_cost + y2_cost
+            trad_cost = trad * ftes * RATE * 1.25
+            cloud_data.append({
+                'Tool': name, 'Cloud': cloud, 'Apps': apps, 'Servers': servers,
+                'Trad Days': trad, 'AI Factor': f, 'AI Days': ai_d,
+                'Days Saved': trad - ai_d, 'Savings %': round((1-f)*100),
+                'FTEs': ftes, 'Y1 Cost': y1_cost, 'Y2 Cost': y2_cost,
+                '2-Year Total': total_2yr, 'Traditional': trad_cost,
+                'Net Savings': trad_cost - total_2yr,
+            })
+
+    cloud_df = pd.DataFrame(cloud_data)
+
+    # Chart 1: AI Days by Cloud per Tool
+    fig_cloud_days = px.bar(
+        cloud_df, x='Cloud', y='AI Days', color='Tool', barmode='group',
+        color_discrete_map=tool_colors,
+        text='AI Days',
+        title='AI-Accelerated Days by Cloud Platform',
+    )
+    fig_cloud_days.update_traces(textposition='outside')
+    fig_cloud_days.update_layout(height=450, legend=dict(orientation='h', y=1.12))
+    st.plotly_chart(fig_cloud_days, use_container_width=True)
+
+    # Chart 2: 2-Year Cost by Cloud per Tool
+    fig_cloud_cost = px.bar(
+        cloud_df, x='Cloud', y='2-Year Total', color='Tool', barmode='group',
+        color_discrete_map=tool_colors,
+        text=cloud_df['2-Year Total'].apply(lambda x: f'${x:,.0f}'),
+        title='2-Year Cost by Cloud Platform ($)',
+    )
+    fig_cloud_cost.update_traces(textposition='outside', textfont_size=9)
+    fig_cloud_cost.update_layout(height=450, yaxis_tickformat='$,.0f', legend=dict(orientation='h', y=1.12))
+    st.plotly_chart(fig_cloud_cost, use_container_width=True)
+
+    # Detailed table
+    st.subheader("Detailed Per-Cloud Breakdown")
+    display_cloud = cloud_df.copy()
+    display_cloud['AI Factor'] = display_cloud['AI Factor'].apply(lambda x: f'{x:.0%}')
+    display_cloud['Savings %'] = display_cloud['Savings %'].apply(lambda x: f'{x}%')
+    for col in ['Y1 Cost', 'Y2 Cost', '2-Year Total', 'Traditional', 'Net Savings']:
+        display_cloud[col] = display_cloud[col].apply(lambda x: f'${x:,.0f}')
+    st.dataframe(display_cloud, use_container_width=True, hide_index=True)
+
+    # Grand total per tool
+    st.subheader("Grand Total Across All Clouds")
+    grand_cloud = cloud_df.groupby('Tool').agg({
+        'AI Days': 'sum', 'Days Saved': 'sum',
+        '2-Year Total': 'sum', 'Traditional': 'sum', 'Net Savings': 'sum',
+    }).reset_index()
+    grand_cloud['Effective Savings %'] = (grand_cloud['Net Savings'] / grand_cloud['Traditional'] * 100).round(0)
+
+    for col in ['2-Year Total', 'Traditional', 'Net Savings']:
+        grand_cloud[col] = grand_cloud[col].apply(lambda x: f'${x:,.0f}')
+    grand_cloud['Effective Savings %'] = grand_cloud['Effective Savings %'].apply(lambda x: f'{x:.0f}%')
+    st.dataframe(grand_cloud, use_container_width=True, hide_index=True)
+
+    # AWS caveat
+    st.warning("""
+    **AWS Transform+Kiro caveat:** AWS-native tools (MGN, DMS, SCT, Q Developer) are best-in-class for
+    **AWS targets (107 apps = 26%)** but do NOT cover Azure or Azure Local. For the remaining **308 apps (74%)**,
+    industry-standard tools are assumed (50-52% savings), making the effective multi-cloud cost higher than the
+    raw AWS-only savings suggest.
+    """)
+
+# ======== TAB 4: Cost to PG&E ========
+with tabs[4]:
     st.header("Total Cost to PG&E — 2-Year Projection")
 
     # Build 2-year cost model per tool
@@ -589,7 +683,7 @@ with tabs[3]:
     """)
 
 # ======== TAB 4: Agentic AI Pillars ========
-with tabs[4]:
+with tabs[5]:
     st.header("Agentic AI Pillars — Capability Architecture")
 
     st.markdown("""
@@ -782,7 +876,7 @@ with tabs[4]:
     """)
 
 # ======== TAB 5: Phase Breakdown ========
-with tabs[5]:
+with tabs[6]:
     st.header("Phase-by-Phase Comparison")
 
     for name in tool_names:
@@ -810,7 +904,7 @@ with tabs[5]:
         st.plotly_chart(fig_p, use_container_width=True)
 
 # ======== TAB 5: Team & FTE ========
-with tabs[6]:
+with tabs[7]:
     st.header("Team & FTE Distribution")
 
     for name in tool_names:
@@ -836,7 +930,7 @@ with tabs[6]:
         st.plotly_chart(fig_fte, use_container_width=True)
 
 # ======== TAB 6: Activity Detail ========
-with tabs[7]:
+with tabs[8]:
     st.header("Activity-Level Detail")
 
     selected_tool = st.selectbox("Select Tool", tool_names)
@@ -855,7 +949,7 @@ with tabs[7]:
     st.dataframe(tool_acts, use_container_width=True)
 
 # ======== TAB 7: Agentic AI ========
-with tabs[8]:
+with tabs[9]:
     st.header("Agentic AI Radar")
 
     agentic_data = {
