@@ -193,11 +193,11 @@ tabs = st.tabs([
 
 # ======== TAB 1: Executive Summary ========
 with tabs[0]:
-    st.header("Executive Summary — 3-Way Comparison")
+    st.header("Executive Summary")
 
-    # KPI cards
-    cols = st.columns(len(tool_names))
-    for i, name in enumerate(tool_names):
+    # Compute stats for all tools
+    tool_stats = {}
+    for name in tool_names:
         factors = all_factors[name]
         avg_savings = sum(factors.values()) / len(factors) if factors else 0
         phases_df = all_phases[name]
@@ -205,63 +205,137 @@ with tabs[0]:
         ai_total = phases_df['AI_Days'].sum()
         trad_cost = (phases_df['Trad_Days'] * phases_df['FTEs'] * phases_df['Rate']).sum()
         ai_cost = (phases_df['AI_Days'] * phases_df['FTEs'] * phases_df['Rate']).sum()
+        tool_stats[name] = {
+            'savings': avg_savings, 'ai_days': ai_total, 'trad_days': trad_total,
+            'ai_cost': ai_cost, 'trad_cost': trad_cost, 'days_saved': trad_total - ai_total,
+        }
 
+    # ---- KPI cards (compact) ----
+    cols = st.columns(len(tool_names))
+    for i, name in enumerate(tool_names):
+        s = tool_stats[name]
+        color = tool_colors.get(name, '#666')
         with cols[i]:
-            color = tool_colors.get(name, '#666')
             st.markdown(f"""
-            <div style="background: linear-gradient(135deg, {color} 0%, {color}CC 100%);
-                        padding: 1.5rem; border-radius: 12px; color: white; text-align: center;">
-                <div style="font-size: 1.3rem; font-weight: bold; margin-bottom: 1rem;">{name}</div>
-                <div style="font-size: 2.5rem; font-weight: bold;">{avg_savings:.0f}%</div>
-                <div style="opacity: 0.9; margin-bottom: 0.8rem;">Blended AI Savings</div>
-                <hr style="opacity: 0.3;">
-                <div style="font-size: 1.4rem; font-weight: bold;">{int(ai_total)} days</div>
-                <div style="opacity: 0.9;">Remaining Duration</div>
-                <hr style="opacity: 0.3;">
-                <div style="font-size: 1.4rem; font-weight: bold;">${ai_cost:,.0f}</div>
-                <div style="opacity: 0.9;">Phase Labor Cost</div>
-                <hr style="opacity: 0.3;">
-                <div style="font-size: 1.1rem;">{int(trad_total - ai_total)} days saved</div>
-                <div style="opacity: 0.9;">vs Traditional ({int(trad_total)} days)</div>
+            <div style="background: linear-gradient(135deg, {color}, {color}CC);
+                        padding: 1.2rem; border-radius: 12px; color: white; text-align: center;">
+                <div style="font-size: 1.1rem; font-weight: bold;">{name}</div>
+                <div style="font-size: 2.2rem; font-weight: bold; margin: 0.3rem 0;">{s['savings']:.0f}%</div>
+                <div style="opacity: 0.85; font-size: 0.85rem;">Savings | {int(s['ai_days'])}d | ${s['ai_cost']:,.0f}</div>
             </div>
             """, unsafe_allow_html=True)
 
-    # Winner banner — with multi-cloud coverage weighting
-    if len(tool_names) > 1:
-        # Multi-cloud coverage: AWS-only tools get penalized for not covering Azure/AzLocal (74% of PG&E workload)
-        multi_cloud_coverage = {
-            'CloudMigrate.store': 1.0,     # Covers AWS + Azure + Azure Local
-            'Matilda Cloud': 1.0,           # Covers AWS + Azure + GCP
-            'Concierto Migrate': 1.0,       # Covers AWS + Azure + GCP
-            'AWS Transform+Kiro': 0.26,     # AWS-only = 107/415 apps = 26% coverage
-        }
+    st.markdown("")
 
-        def effective_savings(name):
-            raw = sum(all_factors[name].values()) / len(all_factors[name])
-            coverage = multi_cloud_coverage.get(name, 1.0)
-            # Effective = raw savings * coverage + industry baseline (59%) * uncovered portion
-            return raw * coverage + 59 * (1 - coverage)
+    # ---- "Who Wins Where" — the eye-catching highlight table ----
+    st.subheader("Who Wins Where")
 
-        best_tool = max(tool_names, key=effective_savings)
-        best_eff = effective_savings(best_tool)
-        best_raw = sum(all_factors[best_tool].values()) / len(all_factors[best_tool])
+    # Define competition areas with category groupings
+    areas = [
+        ('Discovery & Assessment', ['Infrastructure Discovery', 'App Dependency Mapping', 'Performance Baseline']),
+        ('Database Migration', ['Database Analysis', 'Schema Conversion']),
+        ('Planning & Wave', ['Wave Planning', 'TCO / Cost Modeling', 'License Analysis']),
+        ('IaC / Terraform', ['Terraform/IaC Generation', 'Landing Zone Design']),
+        ('Containerization', ['Container Artifact Gen', 'Containerize Execution']),
+        ('Code Modernization', ['Framework Upgrades', 'Middleware Migration']),
+        ('Rehost Execution', ['Rehost Execution', 'Replatform Execution']),
+        ('Testing (FR + NFR)', ['FR Testing (60%)', 'NFR Testing (30%)']),
+        ('Security & Compliance', ['Compliance & Security', 'Vuln Discovery Scan', 'Vuln Patch Execution']),
+        ('Cost Optimization', ['Right-Sizing', 'Monitoring Setup']),
+        ('Multi-Cloud Coverage', []),  # Special handling
+    ]
 
+    # Multi-cloud coverage scores
+    coverage_scores = {
+        'CloudMigrate.store': 100, 'Matilda Cloud': 100,
+        'Concierto Migrate': 100, 'AWS Transform+Kiro': 26,
+    }
+
+    area_html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px;">'
+
+    for area_name, categories in areas:
+        if area_name == 'Multi-Cloud Coverage':
+            # Special: coverage-based winner
+            scores = {n: coverage_scores.get(n, 0) for n in tool_names}
+        else:
+            scores = {}
+            for name in tool_names:
+                vals = [all_factors[name].get(c, 0) for c in categories if c in all_factors[name]]
+                scores[name] = sum(vals) / len(vals) if vals else 0
+
+        winner = max(scores, key=scores.get)
+        winner_score = scores[winner]
+        winner_color = tool_colors.get(winner, '#666')
+
+        # Check if tie (within 2%)
+        sorted_scores = sorted(scores.values(), reverse=True)
+        is_tie = len(sorted_scores) > 1 and (sorted_scores[0] - sorted_scores[1]) < 2
+
+        if is_tie:
+            badge = '<span style="background:#FFF2CC;color:#BF8F00;padding:3px 10px;border-radius:12px;font-weight:bold;font-size:0.8rem;">TIE</span>'
+        else:
+            short_name = winner.split('.')[0].split('+')[0].split(' ')[0]  # First word
+            badge = f'<span style="background:{winner_color};color:white;padding:3px 10px;border-radius:12px;font-weight:bold;font-size:0.8rem;">{short_name}</span>'
+
+        # Runner up
+        others = {k: v for k, v in scores.items() if k != winner}
+        runner = max(others, key=others.get) if others else ''
+        runner_score = others.get(runner, 0)
+
+        area_html += f"""
+        <div style="border: 2px solid {winner_color if not is_tie else '#BF8F00'}; border-radius: 10px;
+                    padding: 0.8rem; background: white;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
+                <span style="font-weight: bold; font-size: 0.95rem; color: #1F4E79;">{area_name}</span>
+                {badge}
+            </div>
+            <div style="font-size: 0.8rem; color: #666;">
+                {winner}: <b>{winner_score:.0f}%</b>
+                {f' | {runner}: {runner_score:.0f}%' if runner else ''}
+            </div>
+        </div>
+        """
+
+    area_html += '</div>'
+    st.markdown(area_html, unsafe_allow_html=True)
+
+    # ---- Overall Winner with caveat ----
+    st.markdown("")
+
+    multi_cloud_coverage = {
+        'CloudMigrate.store': 1.0, 'Matilda Cloud': 1.0,
+        'Concierto Migrate': 1.0, 'AWS Transform+Kiro': 0.26,
+    }
+
+    def effective_savings(name):
+        raw = tool_stats[name]['savings']
+        cov = multi_cloud_coverage.get(name, 1.0)
+        return raw * cov + 59 * (1 - cov)
+
+    best_tool = max(tool_names, key=effective_savings)
+    best_eff = effective_savings(best_tool)
+    best_color = tool_colors.get(best_tool, '#006100')
+
+    col_w1, col_w2 = st.columns([2, 1])
+    with col_w1:
         st.markdown(f"""
-        <div style="background: #E2EFDA; padding: 1rem; border-radius: 10px; text-align: center;
-                    border: 2px solid #006100; margin-top: 1rem;">
-            <span style="font-size: 1.3rem; font-weight: bold; color: #006100;">
-                Best for PG&E Multi-Cloud: {best_tool} — {best_eff:.0f}% effective savings
-            </span>
+        <div style="background: linear-gradient(135deg, {best_color}, {best_color}99);
+                    padding: 1.2rem; border-radius: 12px; color: white; text-align: center;">
+            <div style="font-size: 0.9rem; opacity: 0.9;">Best for PG&E Multi-Cloud (AWS+Azure+AzLocal)</div>
+            <div style="font-size: 1.8rem; font-weight: bold; margin: 0.3rem 0;">{best_tool}</div>
+            <div style="font-size: 1.1rem;">{best_eff:.0f}% effective savings across all 415 apps</div>
         </div>
         """, unsafe_allow_html=True)
-
-        # Show coverage caveat
+    with col_w2:
         st.markdown("""
-        <div style="background: #FFF2CC; padding: 0.8rem; border-radius: 8px; border: 1px solid #BF8F00;
-                    margin-top: 0.5rem; font-size: 0.9rem; color: #BF8F00; text-align: center;">
-            <b>Multi-Cloud Coverage Note:</b> PG&E has AWS (26%) + Azure (35%) + Azure Local (27%) + Other (12%).
-            AWS-only tools score high per-category but only cover 26% of the workload.
-            Effective savings = Raw savings x Coverage + Industry baseline (59%) x Uncovered portion.
+        <div style="background: #FFF2CC; padding: 1.2rem; border-radius: 12px; text-align: center;
+                    border: 1px solid #BF8F00;">
+            <div style="font-size: 0.85rem; color: #BF8F00; font-weight: bold;">Coverage Note</div>
+            <div style="font-size: 0.8rem; color: #666; margin-top: 0.3rem;">
+                AWS tools: 26% coverage<br>
+                Others: 100% multi-cloud<br>
+                Weighted by PG&E workload split
+            </div>
         </div>
         """, unsafe_allow_html=True)
 
