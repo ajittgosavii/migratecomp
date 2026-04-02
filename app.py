@@ -274,8 +274,7 @@ with tabs[1]:
 
     # Detail table
     st.subheader("Detailed Factor Table")
-    styled_df = factor_df.style.background_gradient(subset=tool_names, cmap='Greens', vmin=40, vmax=80)
-    st.dataframe(styled_df, use_container_width=True, height=600)
+    st.dataframe(factor_df, use_container_width=True, height=600)
 
 # ======== TAB 3: Timeline & Cost ========
 with tabs[2]:
