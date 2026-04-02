@@ -474,14 +474,17 @@ with tabs[3]:
         'AWS Transform+Kiro':  {'AWS': 0.34, 'Azure': 0.50, 'Azure Local': 0.52, 'note': 'AWS-native only; Azure/AzLocal = industry std'},
     }
 
-    # Build comparison data
+    # Build comparison data — FTEs SPLIT across clouds (team of 14 total)
+    # AWS=4 FTEs (28%), Azure=5 FTEs (38%), AzLocal=5 FTEs (34%)
+    cloud_ftes = {'AWS': 4, 'Azure': 5, 'Azure Local': 5}
+
     cloud_data = []
     for name in tool_names:
         factors = cloud_factors.get(name, {'AWS': 0.45, 'Azure': 0.45, 'Azure Local': 0.45})
         for cloud, trad, apps, servers in [('AWS', AWS_TRAD, 107, 719), ('Azure', AZ_TRAD, 145, 852), ('Azure Local', AZL_TRAD, 130, 2702)]:
             f = factors.get(cloud, 0.45)
             ai_d = round(trad * f)
-            ftes = round(17 * apps / 382)  # proportional FTE allocation
+            ftes = cloud_ftes.get(cloud, 5)  # Split FTEs, not duplicated
             y1_cost = ai_d * ftes * RATE
             y2_cost = y1_cost * 0.13
             total_2yr = y1_cost + y2_cost
