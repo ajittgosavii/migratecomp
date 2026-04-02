@@ -185,10 +185,12 @@ tabs = st.tabs([
     "Executive Summary",
     "AI Factor Comparison",
     "Timeline & Cost",
+    "Cost to PG&E",
+    "Agentic AI Pillars",
     "Phase Breakdown",
     "Team & FTE View",
     "Activity Detail",
-    "Agentic AI",
+    "Agentic AI Radar",
 ])
 
 # ======== TAB 1: Executive Summary ========
@@ -445,8 +447,342 @@ with tabs[2]:
         })
     st.dataframe(pd.DataFrame(savings_rows), use_container_width=True)
 
-# ======== TAB 4: Phase Breakdown ========
+# ======== TAB 3: Cost to PG&E ========
 with tabs[3]:
+    st.header("Total Cost to PG&E — 2-Year Projection")
+
+    # Build 2-year cost model per tool
+    cost_2yr_rows = []
+    for name in tool_names:
+        p = all_phases[name]
+        ai_labor = (p['AI_Days'] * p['FTEs'] * p['Rate']).sum()
+        trad_labor = (p['Trad_Days'] * p['FTEs'] * p['Rate']).sum()
+
+        # Platform license costs (annual)
+        license_costs = {
+            'CloudMigrate.store': 48000,
+            'Matilda Cloud': 45000,
+            'Concierto Migrate': 60000,  # Concierto enterprise license higher
+            'AWS Transform+Kiro': 0,     # Pay-per-use (included in AWS bill)
+        }
+
+        # Infra cost (PG&E provides LZ, only app-level)
+        infra_monthly = 500  # Minimal since PG&E provides foundational
+
+        # Year 1: Migration execution
+        y1_labor = ai_labor
+        y1_license = license_costs.get(name, 40000)
+        y1_infra = infra_monthly * 12
+        y1_tooling = 25000  # DMS, Terraform Cloud, monitoring
+        y1_training = 20000
+        y1_cybersec = 35000
+        y1_vuln_tooling = 18000
+        y1_subtotal = y1_labor + y1_license + y1_infra + y1_tooling + y1_training + y1_cybersec + y1_vuln_tooling
+        y1_contingency = y1_subtotal * 0.12
+        y1_total = y1_subtotal + y1_contingency
+
+        # Year 2: Steady-state
+        y2_labor = ai_labor * 0.13  # 13% steady-state
+        y2_license = y1_license
+        y2_infra = infra_monthly * 12 * 0.85
+        y2_tooling = 18000
+        y2_training = 8000
+        y2_cybersec = 25000
+        y2_vuln_tooling = 18000
+        y2_subtotal = y2_labor + y2_license + y2_infra + y2_tooling + y2_training + y2_cybersec + y2_vuln_tooling
+        y2_contingency = y2_subtotal * 0.12
+        y2_total = y2_subtotal + y2_contingency
+
+        grand_total = y1_total + y2_total
+
+        # Traditional 2-year
+        trad_2yr = trad_labor * 1.25
+
+        cost_2yr_rows.append({
+            'Tool': name,
+            'Y1 Labor': y1_labor, 'Y1 License': y1_license,
+            'Y1 Infra': y1_infra, 'Y1 Tooling': y1_tooling,
+            'Y1 Training': y1_training, 'Y1 CyberSec': y1_cybersec,
+            'Y1 Vuln Tooling': y1_vuln_tooling,
+            'Y1 Contingency (12%)': y1_contingency,
+            'Year 1 Total': y1_total,
+            'Y2 Labor (13%)': y2_labor, 'Y2 License': y2_license,
+            'Y2 Other': y2_tooling + y2_training + y2_cybersec + y2_vuln_tooling + y2_infra,
+            'Y2 Contingency (12%)': y2_contingency,
+            'Year 2 Total': y2_total,
+            '2-Year Grand Total': grand_total,
+            'Traditional 2-Year': trad_2yr,
+            'Net Savings ($)': trad_2yr - grand_total,
+            'Net Savings (%)': (trad_2yr - grand_total) / trad_2yr * 100 if trad_2yr > 0 else 0,
+        })
+
+    cost_df = pd.DataFrame(cost_2yr_rows)
+
+    # KPI metrics row
+    st.subheader("2-Year Grand Total by Tool")
+    cols = st.columns(len(tool_names))
+    for i, name in enumerate(tool_names):
+        row = cost_df[cost_df['Tool'] == name].iloc[0]
+        color = tool_colors.get(name, '#666')
+        with cols[i]:
+            st.metric(
+                label=name,
+                value=f"${row['2-Year Grand Total']:,.0f}",
+                delta=f"-${row['Net Savings ($)']:,.0f} saved",
+                delta_color="normal",
+            )
+
+    # Stacked bar: Y1 vs Y2
+    y1y2_data = []
+    for _, row in cost_df.iterrows():
+        y1y2_data.append({'Tool': row['Tool'], 'Period': 'Year 1 (Migration)', 'Cost': row['Year 1 Total']})
+        y1y2_data.append({'Tool': row['Tool'], 'Period': 'Year 2 (Steady-State)', 'Cost': row['Year 2 Total']})
+    # Add traditional
+    if cost_2yr_rows:
+        trad_y1 = cost_2yr_rows[0]['Traditional 2-Year'] * 0.8
+        trad_y2 = cost_2yr_rows[0]['Traditional 2-Year'] * 0.2
+        y1y2_data.append({'Tool': 'Traditional (No AI)', 'Period': 'Year 1 (Migration)', 'Cost': trad_y1})
+        y1y2_data.append({'Tool': 'Traditional (No AI)', 'Period': 'Year 2 (Steady-State)', 'Cost': trad_y2})
+
+    y1y2_df = pd.DataFrame(y1y2_data)
+    fig_cost = px.bar(
+        y1y2_df, x='Tool', y='Cost', color='Period', barmode='stack',
+        title='2-Year Total Cost to PG&E — Year 1 vs Year 2',
+        text=y1y2_df['Cost'].apply(lambda x: f'${x:,.0f}'),
+        color_discrete_sequence=['#2E75B6', '#70AD47'],
+    )
+    fig_cost.update_layout(height=500, yaxis_tickformat='$,.0f', yaxis_title='Cost (USD)')
+    fig_cost.update_traces(textposition='inside', textfont_size=10)
+    st.plotly_chart(fig_cost, use_container_width=True)
+
+    # Cost breakdown table
+    st.subheader("Detailed Cost Breakdown")
+    display_cols = ['Tool', 'Y1 Labor', 'Y1 License', 'Y1 Infra', 'Y1 Tooling', 'Y1 Training',
+                    'Y1 CyberSec', 'Y1 Vuln Tooling', 'Y1 Contingency (12%)', 'Year 1 Total',
+                    'Year 2 Total', '2-Year Grand Total', 'Traditional 2-Year', 'Net Savings ($)', 'Net Savings (%)']
+    display_df = cost_df[display_cols].copy()
+    for col in display_df.columns:
+        if col not in ('Tool', 'Net Savings (%)'):
+            display_df[col] = display_df[col].apply(lambda x: f'${x:,.0f}' if isinstance(x, (int, float)) else x)
+        elif col == 'Net Savings (%)':
+            display_df[col] = display_df[col].apply(lambda x: f'{x:.0f}%')
+    st.dataframe(display_df, use_container_width=True)
+
+    # Savings waterfall
+    st.subheader("Net Savings vs Traditional")
+    savings_fig = px.bar(
+        cost_df, x='Tool', y='Net Savings ($)', color='Tool',
+        color_discrete_map=tool_colors,
+        text=cost_df['Net Savings ($)'].apply(lambda x: f'${x:,.0f}'),
+        title='Net Savings vs Traditional Migration (2-Year)',
+    )
+    savings_fig.update_traces(textposition='outside')
+    savings_fig.update_layout(height=400, showlegend=False, yaxis_tickformat='$,.0f', yaxis_title='Savings (USD)')
+    st.plotly_chart(savings_fig, use_container_width=True)
+
+    st.info("""
+    **Cost Assumptions:**
+    - PG&E provides Landing Zones, Networking, and foundational cloud infrastructure
+    - Year 2 labor = 13% of Year 1 (steady-state operations/optimization)
+    - AWS Transform+Kiro: $0 license (pay-per-use included in AWS bill) but covers AWS-only (26% of workload)
+    - Contingency at 12% for 4,273-server migration with NERC CIP requirements
+    """)
+
+# ======== TAB 4: Agentic AI Pillars ========
+with tabs[4]:
+    st.header("Agentic AI Pillars — Capability Architecture")
+
+    st.markdown("""
+    The **Agentic AI** approach uses autonomous AI agents that can reason, plan, and execute migration tasks
+    independently — unlike traditional rule-based automation. Below is how each tool's AI architecture compares
+    across the 5 pillars of Agentic AI for cloud migration.
+    """)
+
+    # Define the 5 pillars
+    pillars = [
+        {
+            'name': 'Autonomous AI Agents',
+            'icon': 'Pillar 1',
+            'description': 'AI agents that independently reason, plan, and execute migration tasks without step-by-step human guidance',
+            'CloudMigrate.store': {
+                'score': 10, 'detail': '10 Claude-powered agents: IAM, Cost, Compliance, Observability, Containerization, Wave Planning, DR, Performance, Data Masking, Rollback Decision',
+                'examples': 'IAM Agent auto-designs roles for 415 apps | Rollback Agent makes go/no-go cutover decisions | DR Agent generates failover runbooks per wave',
+            },
+            'Matilda Cloud': {
+                'score': 0, 'detail': 'No AI agents. Rule-based workflow automation only.',
+                'examples': 'Workflows execute predefined steps. No autonomous decision-making.',
+            },
+            'Concierto Migrate': {
+                'score': 3, 'detail': 'AI in CloudIgnite (discovery) + Modernize (5000+ rules). Not truly agentic — rule-driven, not reasoning.',
+                'examples': 'CloudIgnite AI classifies workloads. Modernize applies deterministic code transformation rules.',
+            },
+            'AWS Transform+Kiro': {
+                'score': 5, 'detail': 'Amazon Q Developer has agentic code transformation. Kiro IDE has autonomous task execution. AWS-scoped only.',
+                'examples': 'Q Transform: agentic .NET porting (4x faster). Kiro: autonomous multi-file code changes with human oversight.',
+            },
+        },
+        {
+            'name': 'ML Prediction Models',
+            'icon': 'Pillar 2',
+            'description': 'Trained ML models that predict migration outcomes, classify apps, and detect anomalies',
+            'CloudMigrate.store': {
+                'score': 9, 'detail': '4 trained models: App Classifier (91% accuracy, 14 features), Right-Sizer, Duration Predictor, Anomaly Detector',
+                'examples': '91% accuracy classifying 415 apps into 6R | Predicts per-wave duration for project scheduling | Catches post-migration anomalies before users report',
+            },
+            'Matilda Cloud': {
+                'score': 0, 'detail': 'No ML models. Uses static rules for classification and sizing.',
+                'examples': 'Rule-based app classification. No predictive capabilities.',
+            },
+            'Concierto Migrate': {
+                'score': 4, 'detail': 'Maximize module has ML for cost optimization. CloudIgnite has AI workload recommendations.',
+                'examples': 'Maximize: real-time cost forecasting. CloudIgnite: AI-powered per-workload cloud recommendation.',
+            },
+            'AWS Transform+Kiro': {
+                'score': 2, 'detail': 'No dedicated migration ML models. Relies on Q Developer ML (general-purpose coding AI).',
+                'examples': 'Compute Optimizer uses ML for sizing (AWS-only). No migration-specific prediction.',
+            },
+        },
+        {
+            'name': 'MCP Microservices',
+            'icon': 'Pillar 3',
+            'description': 'Dedicated microservices providing specialized intelligence for each migration domain',
+            'CloudMigrate.store': {
+                'score': 10, 'detail': '8 MCP services: Database Catalog, Compliance Framework, Cloud Cost, Migration Tools, Enterprise Services, Analytics, Terraform Generator, Source Scanner',
+                'examples': 'Terraform Generator auto-creates HCL from discovery | DB Catalog provides cross-cloud schema mapping | Compliance Framework checks NERC CIP automatically',
+            },
+            'Matilda Cloud': {
+                'score': 0, 'detail': 'Monolithic architecture. No dedicated microservices for migration domains.',
+                'examples': 'Single application handles all functions. No specialized domain services.',
+            },
+            'Concierto Migrate': {
+                'score': 5, 'detail': '5 modules (Migrate/Modernize/Manage/Maximize/Intelligence) but not microservice architecture.',
+                'examples': 'CloudMach (execution), CloudIgnite (discovery), Maximize (cost). Modular but not independent services.',
+            },
+            'AWS Transform+Kiro': {
+                'score': 3, 'detail': 'Uses AWS native services (MGN, DMS, SCT) as separate services. Not integrated into a migration microservice architecture.',
+                'examples': 'MGN for rehost, DMS for DB, SCT for schema. Separate console/API per service — not orchestrated.',
+            },
+        },
+        {
+            'name': 'Guardrails & Safety',
+            'icon': 'Pillar 4',
+            'description': 'Safety controls that prevent runaway costs, unsafe operations, and data loss during AI-driven migration',
+            'CloudMigrate.store': {
+                'score': 10, 'detail': '5 enforced controls: Source Protection, Encryption Enforcement, Budget Guardrails ($500/action), Code Scanning, Data Validation Required',
+                'examples': 'Budget cap prevents AI from spinning up expensive instances | Source protection ensures no accidental data deletion | Encryption enforced on all migrated data',
+            },
+            'Matilda Cloud': {
+                'score': 1, 'detail': 'Basic workflow approval gates. No AI-specific guardrails.',
+                'examples': 'Manual approval steps in workflows. No automated cost or safety controls.',
+            },
+            'Concierto Migrate': {
+                'score': 3, 'detail': 'Code scanning (5000+ rules in Modernize). Zero-code interface provides transparency but not guardrails.',
+                'examples': 'Modernize scans for security vulnerabilities in code. CloudMach has rollback capability. No budget guardrails.',
+            },
+            'AWS Transform+Kiro': {
+                'score': 6, 'detail': 'AWS IAM + Config Rules + Service Control Policies. Native AWS guardrails are strong but AWS-scoped only.',
+                'examples': 'IAM prevents unauthorized actions. Config Rules enforce compliance. SCPs limit regions/services. But no migration-specific guardrails.',
+            },
+        },
+        {
+            'name': 'Context & Memory',
+            'icon': 'Pillar 5',
+            'description': 'AI retains project context across sessions, learns from past migrations, and provides conversational assistance',
+            'CloudMigrate.store': {
+                'score': 10, 'detail': 'Per-project agentic memory, AI chat with SSE streaming, 39 agentic API routes, context retention across migration phases',
+                'examples': 'AI remembers Phase 1 findings when executing Phase 3 | Chat assistant answers migration questions in context | Streaming responses for real-time feedback',
+            },
+            'Matilda Cloud': {
+                'score': 0, 'detail': 'No AI memory or conversational interface. Stateless workflow execution.',
+                'examples': 'Each workflow run is independent. No learning or context retention.',
+            },
+            'Concierto Migrate': {
+                'score': 2, 'detail': 'Zero-code interface provides UI transparency. Intelligence module has data analytics. No conversational AI.',
+                'examples': 'Intelligence module analyzes data patterns. No memory or chat interface.',
+            },
+            'AWS Transform+Kiro': {
+                'score': 7, 'detail': 'Kiro IDE has project context, spec-driven development, and Claude AI chat. Q Developer retains session context.',
+                'examples': 'Kiro: specs persist across sessions. Q Developer: conversational code transformation. But no migration-specific memory.',
+            },
+        },
+    ]
+
+    # Pillar score comparison chart
+    pillar_chart_data = []
+    for pillar in pillars:
+        for name in tool_names:
+            if name in pillar:
+                pillar_chart_data.append({
+                    'Pillar': pillar['name'],
+                    'Tool': name,
+                    'Score': pillar[name]['score'],
+                })
+
+    pillar_df = pd.DataFrame(pillar_chart_data)
+    fig_pillars = px.bar(
+        pillar_df, x='Pillar', y='Score', color='Tool', barmode='group',
+        color_discrete_map=tool_colors,
+        title='Agentic AI Pillar Scores (0-10 scale)',
+        text='Score',
+    )
+    fig_pillars.update_traces(textposition='outside')
+    fig_pillars.update_layout(
+        height=500, xaxis_tickangle=-20,
+        legend=dict(orientation='h', y=1.12, x=0.5, xanchor='center'),
+        yaxis=dict(range=[0, 12], title='Score (0-10)'),
+    )
+    st.plotly_chart(fig_pillars, use_container_width=True)
+
+    # Detailed pillar cards
+    for pillar in pillars:
+        st.subheader(f"{pillar['icon']}: {pillar['name']}")
+        st.caption(pillar['description'])
+
+        pcols = st.columns(len(tool_names))
+        for i, name in enumerate(tool_names):
+            if name in pillar:
+                info = pillar[name]
+                score = info['score']
+                color = tool_colors.get(name, '#666')
+                with pcols[i]:
+                    # Score badge
+                    if score >= 8:
+                        st.success(f"**{name}**: {score}/10")
+                    elif score >= 4:
+                        st.warning(f"**{name}**: {score}/10")
+                    else:
+                        st.error(f"**{name}**: {score}/10")
+                    st.markdown(f"**Detail:** {info['detail']}")
+                    st.markdown(f"*Examples: {info['examples']}*")
+
+    # Total pillar scores
+    st.subheader("Agentic AI Total Score")
+    total_scores = {}
+    for name in tool_names:
+        total = sum(p[name]['score'] for p in pillars if name in p)
+        total_scores[name] = total
+
+    score_df = pd.DataFrame([
+        {'Tool': name, 'Total Score': score, 'Out of': 50,
+         'Grade': 'A+' if score >= 40 else 'A' if score >= 30 else 'B' if score >= 20 else 'C' if score >= 10 else 'D'}
+        for name, score in total_scores.items()
+    ])
+    st.dataframe(score_df, use_container_width=True, hide_index=True)
+
+    best_ai = max(total_scores, key=total_scores.get)
+    st.success(f"**Agentic AI Leader: {best_ai}** — {total_scores[best_ai]}/50 ({total_scores[best_ai]/50*100:.0f}%)")
+
+    st.info("""
+    **Scoring Methodology:**
+    - **10/10**: Production-ready, fully autonomous, purpose-built for migration
+    - **7-9**: Strong capability but with limitations (scope, coverage, maturity)
+    - **4-6**: Partial capability — exists but not fully agentic or migration-specific
+    - **1-3**: Minimal capability — basic rules or manual with some automation
+    - **0**: No capability in this pillar
+    """)
+
+# ======== TAB 5: Phase Breakdown ========
+with tabs[5]:
     st.header("Phase-by-Phase Comparison")
 
     for name in tool_names:
@@ -474,7 +810,7 @@ with tabs[3]:
         st.plotly_chart(fig_p, use_container_width=True)
 
 # ======== TAB 5: Team & FTE ========
-with tabs[4]:
+with tabs[6]:
     st.header("Team & FTE Distribution")
 
     for name in tool_names:
@@ -500,7 +836,7 @@ with tabs[4]:
         st.plotly_chart(fig_fte, use_container_width=True)
 
 # ======== TAB 6: Activity Detail ========
-with tabs[5]:
+with tabs[7]:
     st.header("Activity-Level Detail")
 
     selected_tool = st.selectbox("Select Tool", tool_names)
@@ -519,8 +855,8 @@ with tabs[5]:
     st.dataframe(tool_acts, use_container_width=True)
 
 # ======== TAB 7: Agentic AI ========
-with tabs[6]:
-    st.header("Agentic AI Capabilities")
+with tabs[8]:
+    st.header("Agentic AI Radar")
 
     agentic_data = {
         'Capability': [
