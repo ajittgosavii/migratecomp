@@ -227,10 +227,9 @@ with tabs[0]:
 
     st.markdown("")
 
-    # ---- "Who Wins Where" — the eye-catching highlight table ----
+    # ---- "Who Wins Where" using native Streamlit components ----
     st.subheader("Who Wins Where")
 
-    # Define competition areas with category groupings
     areas = [
         ('Discovery & Assessment', ['Infrastructure Discovery', 'App Dependency Mapping', 'Performance Baseline']),
         ('Database Migration', ['Database Analysis', 'Schema Conversion']),
@@ -242,20 +241,18 @@ with tabs[0]:
         ('Testing (FR + NFR)', ['FR Testing (60%)', 'NFR Testing (30%)']),
         ('Security & Compliance', ['Compliance & Security', 'Vuln Discovery Scan', 'Vuln Patch Execution']),
         ('Cost Optimization', ['Right-Sizing', 'Monitoring Setup']),
-        ('Multi-Cloud Coverage', []),  # Special handling
+        ('Multi-Cloud Coverage', []),
     ]
 
-    # Multi-cloud coverage scores
     coverage_scores = {
         'CloudMigrate.store': 100, 'Matilda Cloud': 100,
         'Concierto Migrate': 100, 'AWS Transform+Kiro': 26,
     }
 
-    area_html = '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px;">'
-
+    # Build winner data for chart
+    winner_rows = []
     for area_name, categories in areas:
         if area_name == 'Multi-Cloud Coverage':
-            # Special: coverage-based winner
             scores = {n: coverage_scores.get(n, 0) for n in tool_names}
         else:
             scores = {}
@@ -264,44 +261,60 @@ with tabs[0]:
                 scores[name] = sum(vals) / len(vals) if vals else 0
 
         winner = max(scores, key=scores.get)
-        winner_score = scores[winner]
-        winner_color = tool_colors.get(winner, '#666')
-
-        # Check if tie (within 2%)
         sorted_scores = sorted(scores.values(), reverse=True)
         is_tie = len(sorted_scores) > 1 and (sorted_scores[0] - sorted_scores[1]) < 2
 
-        if is_tie:
-            badge = '<span style="background:#FFF2CC;color:#BF8F00;padding:3px 10px;border-radius:12px;font-weight:bold;font-size:0.8rem;">TIE</span>'
+        for name in tool_names:
+            winner_rows.append({
+                'Area': area_name, 'Tool': name, 'Score': round(scores.get(name, 0), 1),
+                'Winner': 'TIE' if is_tie else winner,
+            })
+
+    winner_df = pd.DataFrame(winner_rows)
+
+    # Grouped bar chart — this is clean and renders perfectly
+    fig_wins = px.bar(
+        winner_df, x='Area', y='Score', color='Tool', barmode='group',
+        color_discrete_map=tool_colors,
+        title='Savings % by Area — Who Wins Where',
+        text='Score',
+    )
+    fig_wins.update_traces(texttemplate='%{text:.0f}%', textposition='outside', textfont_size=9)
+    fig_wins.update_layout(
+        height=500, xaxis_tickangle=-30,
+        legend=dict(orientation='h', y=1.15, x=0.5, xanchor='center'),
+        yaxis_title='Savings %', xaxis_title='',
+    )
+    st.plotly_chart(fig_wins, use_container_width=True)
+
+    # Winner summary table using st.dataframe with emojis
+    st.subheader("Winner by Area")
+    summary_rows = []
+    for area_name, categories in areas:
+        if area_name == 'Multi-Cloud Coverage':
+            scores = {n: coverage_scores.get(n, 0) for n in tool_names}
         else:
-            short_name = winner.split('.')[0].split('+')[0].split(' ')[0]  # First word
-            badge = f'<span style="background:{winner_color};color:white;padding:3px 10px;border-radius:12px;font-weight:bold;font-size:0.8rem;">{short_name}</span>'
+            scores = {}
+            for name in tool_names:
+                vals = [all_factors[name].get(c, 0) for c in categories if c in all_factors[name]]
+                scores[name] = sum(vals) / len(vals) if vals else 0
 
-        # Runner up
-        others = {k: v for k, v in scores.items() if k != winner}
-        runner = max(others, key=others.get) if others else ''
-        runner_score = others.get(runner, 0)
+        winner = max(scores, key=scores.get)
+        sorted_s = sorted(scores.values(), reverse=True)
+        is_tie = len(sorted_s) > 1 and (sorted_s[0] - sorted_s[1]) < 2
+        winner_label = "TIE" if is_tie else winner
 
-        area_html += f"""
-        <div style="border: 2px solid {winner_color if not is_tie else '#BF8F00'}; border-radius: 10px;
-                    padding: 0.8rem; background: white;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.3rem;">
-                <span style="font-weight: bold; font-size: 0.95rem; color: #1F4E79;">{area_name}</span>
-                {badge}
-            </div>
-            <div style="font-size: 0.8rem; color: #666;">
-                {winner}: <b>{winner_score:.0f}%</b>
-                {f' | {runner}: {runner_score:.0f}%' if runner else ''}
-            </div>
-        </div>
-        """
+        row = {'Area': area_name, 'Winner': winner_label}
+        for name in tool_names:
+            s = scores.get(name, 0)
+            is_w = (name == winner and not is_tie)
+            row[name] = f"{s:.0f}%"
+        summary_rows.append(row)
 
-    area_html += '</div>'
-    st.markdown(area_html, unsafe_allow_html=True)
+    summary_df = pd.DataFrame(summary_rows)
+    st.dataframe(summary_df, use_container_width=True, hide_index=True)
 
-    # ---- Overall Winner with caveat ----
-    st.markdown("")
-
+    # ---- Overall Winner ----
     multi_cloud_coverage = {
         'CloudMigrate.store': 1.0, 'Matilda Cloud': 1.0,
         'Concierto Migrate': 1.0, 'AWS Transform+Kiro': 0.26,
@@ -314,30 +327,9 @@ with tabs[0]:
 
     best_tool = max(tool_names, key=effective_savings)
     best_eff = effective_savings(best_tool)
-    best_color = tool_colors.get(best_tool, '#006100')
 
-    col_w1, col_w2 = st.columns([2, 1])
-    with col_w1:
-        st.markdown(f"""
-        <div style="background: linear-gradient(135deg, {best_color}, {best_color}99);
-                    padding: 1.2rem; border-radius: 12px; color: white; text-align: center;">
-            <div style="font-size: 0.9rem; opacity: 0.9;">Best for PG&E Multi-Cloud (AWS+Azure+AzLocal)</div>
-            <div style="font-size: 1.8rem; font-weight: bold; margin: 0.3rem 0;">{best_tool}</div>
-            <div style="font-size: 1.1rem;">{best_eff:.0f}% effective savings across all 415 apps</div>
-        </div>
-        """, unsafe_allow_html=True)
-    with col_w2:
-        st.markdown("""
-        <div style="background: #FFF2CC; padding: 1.2rem; border-radius: 12px; text-align: center;
-                    border: 1px solid #BF8F00;">
-            <div style="font-size: 0.85rem; color: #BF8F00; font-weight: bold;">Coverage Note</div>
-            <div style="font-size: 0.8rem; color: #666; margin-top: 0.3rem;">
-                AWS tools: 26% coverage<br>
-                Others: 100% multi-cloud<br>
-                Weighted by PG&E workload split
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+    st.success(f"**Best for PG&E Multi-Cloud: {best_tool}** — {best_eff:.0f}% effective savings across all 415 apps")
+    st.warning("**Coverage Note:** PG&E = AWS (26%) + Azure (35%) + Azure Local (27%) + Other (12%). AWS-only tools cover 26% of workload. Effective savings weighted by workload split.")
 
 # ======== TAB 2: AI Factor Comparison ========
 with tabs[1]:
