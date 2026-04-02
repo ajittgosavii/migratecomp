@@ -367,6 +367,14 @@ with tabs[1]:
     )
     st.plotly_chart(fig, use_container_width=True)
 
+    # Coverage caveat
+    st.warning("""
+    **Important: AI Factor = Tool Capability (not coverage).** These percentages show what each tool delivers
+    WHERE it works. AWS Transform+Kiro shows high factors because AWS-native tools (MGN, SCT, Q Developer)
+    are best-in-class — **but they only work on AWS targets (107 apps = 26% of PG&E)**. Azure (145 apps) and
+    Azure Local (130 apps) need separate tooling. See the **Cost by Cloud** tab for the real multi-cloud cost impact.
+    """)
+
     # Detail table
     st.subheader("Detailed Factor Table")
     st.dataframe(factor_df, use_container_width=True, height=600)
