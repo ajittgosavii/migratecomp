@@ -226,16 +226,42 @@ with tabs[0]:
             </div>
             """, unsafe_allow_html=True)
 
-    # Winner banner
+    # Winner banner — with multi-cloud coverage weighting
     if len(tool_names) > 1:
-        best_tool = max(tool_names, key=lambda n: sum(all_factors[n].values()) / len(all_factors[n]))
-        best_savings = sum(all_factors[best_tool].values()) / len(all_factors[best_tool])
+        # Multi-cloud coverage: AWS-only tools get penalized for not covering Azure/AzLocal (74% of PG&E workload)
+        multi_cloud_coverage = {
+            'CloudMigrate.store': 1.0,     # Covers AWS + Azure + Azure Local
+            'Matilda Cloud': 1.0,           # Covers AWS + Azure + GCP
+            'Concierto Migrate': 1.0,       # Covers AWS + Azure + GCP
+            'AWS Transform+Kiro': 0.26,     # AWS-only = 107/415 apps = 26% coverage
+        }
+
+        def effective_savings(name):
+            raw = sum(all_factors[name].values()) / len(all_factors[name])
+            coverage = multi_cloud_coverage.get(name, 1.0)
+            # Effective = raw savings * coverage + industry baseline (59%) * uncovered portion
+            return raw * coverage + 59 * (1 - coverage)
+
+        best_tool = max(tool_names, key=effective_savings)
+        best_eff = effective_savings(best_tool)
+        best_raw = sum(all_factors[best_tool].values()) / len(all_factors[best_tool])
+
         st.markdown(f"""
         <div style="background: #E2EFDA; padding: 1rem; border-radius: 10px; text-align: center;
                     border: 2px solid #006100; margin-top: 1rem;">
             <span style="font-size: 1.3rem; font-weight: bold; color: #006100;">
-                Winner: {best_tool} — {best_savings:.0f}% blended savings
+                Best for PG&E Multi-Cloud: {best_tool} — {best_eff:.0f}% effective savings
             </span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Show coverage caveat
+        st.markdown("""
+        <div style="background: #FFF2CC; padding: 0.8rem; border-radius: 8px; border: 1px solid #BF8F00;
+                    margin-top: 0.5rem; font-size: 0.9rem; color: #BF8F00; text-align: center;">
+            <b>Multi-Cloud Coverage Note:</b> PG&E has AWS (26%) + Azure (35%) + Azure Local (27%) + Other (12%).
+            AWS-only tools score high per-category but only cover 26% of the workload.
+            Effective savings = Raw savings x Coverage + Industry baseline (59%) x Uncovered portion.
         </div>
         """, unsafe_allow_html=True)
 
