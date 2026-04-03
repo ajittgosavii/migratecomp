@@ -218,13 +218,15 @@ with tabs[0]:
     for i, name in enumerate(tool_names):
         s = tool_stats[name]
         color = tool_colors.get(name, '#666')
+        # For AWS, note the coverage limitation
+        coverage_note = " (AWS-only*)" if "AWS" in name else ""
         with cols[i]:
             st.markdown(f"""
             <div style="background: linear-gradient(135deg, {color}, {color}CC);
                         padding: 1.2rem; border-radius: 12px; color: white; text-align: center;">
                 <div style="font-size: 1.1rem; font-weight: bold;">{name}</div>
-                <div style="font-size: 2.2rem; font-weight: bold; margin: 0.3rem 0;">{s['savings']:.0f}%</div>
-                <div style="opacity: 0.85; font-size: 0.85rem;">Savings | {int(s['ai_days'])}d | ${s['ai_cost']:,.0f}</div>
+                <div style="font-size: 2.2rem; font-weight: bold; margin: 0.3rem 0;">{s['savings']:.0f}%{coverage_note}</div>
+                <div style="opacity: 0.85; font-size: 0.85rem;">AI Factor | {int(s['ai_days'])}d | ${s['ai_cost']:,.0f}</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -628,13 +630,14 @@ with tabs[4]:
     cols = st.columns(len(tool_names))
     for i, name in enumerate(tool_names):
         row = cost_df[cost_df['Tool'] == name].iloc[0]
-        color = tool_colors.get(name, '#666')
         with cols[i]:
+            savings = row['Net Savings ($)']
+            savings_pct = row['Net Savings (%)']
             st.metric(
                 label=name,
                 value=f"${row['2-Year Grand Total']:,.0f}",
-                delta=f"-${row['Net Savings ($)']:,.0f} saved",
-                delta_color="normal",
+                delta=f"${savings:,.0f} saved ({savings_pct:.0f}%)" if savings > 0 else f"Over budget by ${abs(savings):,.0f}",
+                delta_color="normal" if savings > 0 else "inverse",
             )
 
     # Stacked bar: Y1 vs Y2
